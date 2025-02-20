@@ -1,3 +1,6 @@
+import os
+import logging
+from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -6,7 +9,23 @@ from telegram.ext import (
     CallbackContext,
     filters,
 )
+
 from datetime import datetime, timedelta
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Загружаем переменные окружения
+TOKEN = os.getenv("TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+# Проверяем, загружен ли токен
+if not TOKEN:
+    raise ValueError("Не найден TOKEN. Укажите его в переменных окружения.")
+
+# Создаем Flask-приложение
+app = Flask(__name__)
 
 # Меню ресторана
 menu = {
@@ -19,17 +38,22 @@ menu = {
 # Состояние пользователя
 user_state = {}
 
-
 # Функция создания списка времени с 10:00 до 20:00 (каждые 30 минут)
 def get_time_slots():
     return [f"{hour:02d}:{minute:02d}" for hour in range(10, 20) for minute in (0, 30)]
-
 
 # Функция создания списка дат на месяц вперед
 def get_available_dates():
     today = datetime.today()
     return [(today + timedelta(days=i)).strftime("%d.%m.%Y") for i in range(30)]
 
+# Инициализация Telegram-бота
+bot_app = (
+    Application.builder()
+    .token(TOKEN)
+    .updater(None)  # Отключаем polling
+    .build()
+)
 
 # Команда /start
 async def start(update: Update, context: CallbackContext):
@@ -43,61 +67,6 @@ async def start(update: Update, context: CallbackContext):
     await update.message.reply_text(
         "Добро пожаловать в Gourmet Haven!", reply_markup=keyboard
     )
-
-
-# Обработка выбора "Забронировать столик"
-async def book_table(update: Update, context: CallbackContext):
-    user_state[update.message.chat_id] = {}  # Очищаем состояние пользователя
-    buttons = [["Сегодня"], ["Завтра"], ["Другой день"], ["🔙 Назад"]]
-    keyboard = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-    await update.message.reply_text("Выберите дату:", reply_markup=keyboard)
-
-
-# Обработка выбора даты
-async def choose_date(update: Update, context: CallbackContext):
-    chat_id = update.message.chat_id
-    text = update.message.text
-
-    if text == "Сегодня":
-        user_state[chat_id]["date"] = datetime.today().strftime("%d.%m.%Y")
-    elif text == "Завтра":
-        user_state[chat_id]["date"] = (datetime.today() + timedelta(days=1)).strftime(
-            "%d.%m.%Y"
-        )
-    elif text == "Другой день":
-        buttons = [[date] for date in get_available_dates()[:7]] + [["🔙 Назад"]]
-        keyboard = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-        await update.message.reply_text("Выберите дату:", reply_markup=keyboard)
-        return
-
-    buttons = [[time] for time in get_time_slots()] + [["🔙 Назад"]]
-    keyboard = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-    await update.message.reply_text("Выберите время:", reply_markup=keyboard)
-
-
-# Обработка выбора времени
-async def choose_time(update: Update, context: CallbackContext):
-    chat_id = update.message.chat_id
-    time = update.message.text
-
-    if time == "🔙 Назад":
-        await book_table(update, context)
-        return
-
-    if time not in get_time_slots():
-        await update.message.reply_text("Выберите корректное время!")
-        return
-
-    user_state[chat_id]["time"] = time
-    date = user_state[chat_id]["date"]
-
-    await update.message.reply_text(
-        f"✅ Ваш столик забронирован на *{date}* в *{time}*.\n"
-        "Ожидайте звонка от нашего менеджера для подтверждения брони. "
-        "Спасибо, что выбрали *Gourmet Haven*!",
-        parse_mode="Markdown",
-    )
-
 
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: CallbackContext):
@@ -114,30 +83,42 @@ async def handle_message(update: Update, context: CallbackContext):
     elif text == "🛎 Вызвать персонал":
         await update.message.reply_text("Сейчас позовем персонал!")
     elif text == "🍽 Забронировать столик":
-        await book_table(update, context)
-    elif text in ["Сегодня", "Завтра", "Другой день"]:
-        await choose_date(update, context)
-    elif text in get_time_slots():
-        await choose_time(update, context)
-    elif text in get_available_dates():
-        user_state[chat_id]["date"] = text
-        buttons = [[time] for time in get_time_slots()] + [["🔙 Назад"]]
-        keyboard = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-        await update.message.reply_text("Выберите время:", reply_markup=keyboard)
-    elif text == "🔙 Назад":
-        await start(update, context)
+        await update.message.reply_text("Бронирование пока недоступно.")
 
+# Добавляем обработчики команд
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Запуск бота
-app = (
-    Application.builder()
-    .token("7338617614:AAExMLzMaFRW-rlHFc3FG8o2dWtReEm-7S8")
-    .build()
-)
+# Маршрут для проверки работы
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot is running!", 200
 
-# Добавляем обработчики
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# Обработчик Webhook (Telegram -> Flask -> Bot)
+@app.route(f"/{TOKEN}", methods=["POST"])
+async def handle_webhook():
+    try:
+        update = Update.de_json(request.get_json(), bot_app.bot)
+        await bot_app.process_update(update)
+        return "", 200
+    except Exception as e:
+        logger.error(f"Ошибка обработки Webhook: {e}")
+        return "", 500
 
-# Запуск бота
-app.run_polling()
+# Устанавливаем Webhook перед запуском
+async def set_webhook():
+    await bot_app.initialize()  # Важно: инициализация перед установкой Webhook
+    await bot_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(set_webhook())  # Устанавливаем Webhook перед запуском Flask
+
+port = os.getenv("PORT")
+print(f"Render PORT: {port}")  # Выведет порт в логах Render
+
+if not port:
+    print("Ошибка: переменная окружения PORT не найдена")
+    exit(1)  # Остановит процесс, если PORT не задан
+
+port = int(port)  # Преобразуем в число
