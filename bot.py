@@ -122,5 +122,5 @@ if not port:
     exit(1)  # Остановит процесс, если PORT не задан
 
 port = int(port)  # Преобразуем в число
-app.run(host="0.0.0.0", port=port)
+
 
