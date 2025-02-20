@@ -1,2 +1,3 @@
 #!/bin/bash
-python bot.py
+gunicorn -w 1 -b 0.0.0.0:$PORT bot:app
+
