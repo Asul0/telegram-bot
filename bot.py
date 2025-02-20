@@ -12,8 +12,6 @@ from telegram.ext import (
 
 from datetime import datetime, timedelta
 import asyncio
-from asgiref.wsgi import WsgiToAsgi
-from asgiref.sync import async_to_sync
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -32,7 +30,6 @@ PORT = int(PORT)
 
 # Создаем Flask-приложение
 app = Flask(__name__)
-asgi_app = WsgiToAsgi(app)
 
 # Меню ресторана
 menu = {
@@ -101,6 +98,5 @@ async def set_webhook():
     await bot_app.bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
 
 if __name__ == "__main__":
-    import threading
-    threading.Thread(target=lambda: asyncio.run(set_webhook())).start()  # Фоновая установка Webhook
+    asyncio.run(set_webhook())  # Устанавливаем Webhook
     app.run(host="0.0.0.0", port=PORT)
