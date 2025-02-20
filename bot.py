@@ -114,7 +114,7 @@ if __name__ == "__main__":
     import asyncio
     asyncio.run(set_webhook())  # Устанавливаем Webhook перед запуском Flask
 
- port = os.getenv("PORT")
+port = os.getenv("PORT")
 print(f"Render PORT: {port}")  # Выведет порт в логах Render
 
 if not port:
@@ -123,3 +123,4 @@ if not port:
 
 port = int(port)  # Преобразуем в число
 app.run(host="0.0.0.0", port=port)
+
